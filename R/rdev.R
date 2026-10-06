@@ -437,13 +437,15 @@ rdev_check_cache <- function(root, cache_dir, fingerprint) {
   if (!is.null(cache_dir)) {
     previous <- rdev_fingerprint_read(cache_dir)
     if (!is.null(previous) && previous != fingerprint) {
+      ## Keep the old stamp, so the warning repeats until the cache is cleared
       warning(
         "The old R build has changed, but the package cache ",
         cache_dir,
         " is shared and was not cleared. It may hold binaries built by ",
-        "the previous build.",
+        "the previous build. Remove it to silence this warning.",
         call. = FALSE
       )
+      return(invisible())
     }
     dir_create(cache_dir)
     writeLines(fingerprint, rdev_fingerprint_path(cache_dir))
@@ -641,6 +643,10 @@ rdev_library_snapshot <- function(lib) {
 
   ## The library changes between checks, so bypass the per-session cache
   installed <- installed.packages(lib, noCache = TRUE)
+  if (!nrow(installed)) {
+    return(character())
+  }
+
   sort(paste0(installed[, "Package"], "@", installed[, "Version"]))
 }
 

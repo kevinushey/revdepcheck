@@ -217,6 +217,9 @@ test_that("old results are only reused against the same dependency versions", {
   )
   expect_identical(rdev_library_snapshot(lib), "dep@2.0")
   expect_identical(rdev_library_snapshot(tempfile()), character())
+  empty <- tempfile("empty-lib-")
+  dir.create(empty)
+  expect_identical(rdev_library_snapshot(empty), character())
 
   check <- structure(
     list(package = "foo", version = "1.0", libraries = "dep@2.0"),
@@ -312,12 +315,14 @@ test_that("the package cache is cleared when the old build changes", {
   expect_false(file.exists(file.path(cache, "binary")))
   expect_identical(rdev_fingerprint_read(cache), "build B")
 
-  ## A shared cache is only warned about
+  ## A shared cache is only warned about, on every run until it is cleared
   shared <- tempfile("shared-cache-")
   rdev_check_cache(root, shared, "build A")
   writeLines("x", file.path(shared, "binary"))
   expect_warning(rdev_check_cache(root, shared, "build B"), "not cleared")
+  expect_warning(rdev_check_cache(root, shared, "build B"), "not cleared")
   expect_true(file.exists(file.path(shared, "binary")))
+  expect_identical(rdev_fingerprint_read(shared), "build A")
 })
 
 test_that("check_done() snapshots dependencies before the library is removed", {
