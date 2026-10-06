@@ -129,7 +129,9 @@ private library, checks it with both builds, and writes the reports
 After changing and rebuilding the new R, call \code{rdev_add_broken()} (or
 \code{rdev_add()}) and \code{rdev_check()} again. With \code{reuse_old = TRUE} the
 results of the old build are kept, and only the new build is re-run. If
-the old build itself changes, all packages are checked again.
+the old build itself changes (its path, version, svn revision or the
+modification time of its binaries), all packages are checked again and
+the tools library is rebuilt.
 
 Both builds share the dependency libraries, which are installed by the
 old build. This assumes the two builds have the same \code{major.minor}

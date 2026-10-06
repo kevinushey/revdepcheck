@@ -123,6 +123,28 @@ test_that("rdev_tools_built_for() reads the R version from the Built field", {
   expect_null(rdev_tools_built_for(tools))
 })
 
+test_that("rdev_r_info() fingerprints a build by more than its version", {
+  skip_on_cran()
+  skip_on_os("windows")
+
+  rbin <- file.path(R.home("bin"), "R")
+  info <- rdev_r_info(rbin)
+
+  expect_identical(info$version, R.version.string)
+  expect_identical(
+    info$minor,
+    paste(R.version$major, sub("[.].*$", "", R.version$minor), sep = ".")
+  )
+  expect_true(startsWith(info$fingerprint, paste0(rbin, " | ", info$version)))
+  expect_match(info$fingerprint, "\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$")
+
+  ## The same R reached through another path is a different build
+  alias <- file.path(tempfile("alias-"), "R")
+  dir.create(dirname(alias))
+  file.symlink(rbin, alias)
+  expect_false(identical(rdev_r_info(alias)$fingerprint, info$fingerprint))
+})
+
 test_that("tarball_version()", {
   expect_identical(tarball_version("/x/y/foo_1.2.3.tar.gz"), "1.2.3")
   expect_identical(tarball_version("data.table_1.15.0.tar.gz"), "1.15.0")

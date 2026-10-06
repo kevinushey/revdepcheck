@@ -28,7 +28,9 @@
 #' After changing and rebuilding the new R, call `rdev_add_broken()` (or
 #' `rdev_add()`) and `rdev_check()` again. With `reuse_old = TRUE` the
 #' results of the old build are kept, and only the new build is re-run. If
-#' the old build itself changes, all packages are checked again.
+#' the old build itself changes (its path, version, svn revision or the
+#' modification time of its binaries), all packages are checked again and
+#' the tools library is rebuilt.
 #'
 #' Both builds share the dependency libraries, which are installed by the
 #' old build. This assumes the two builds have the same `major.minor`
@@ -314,8 +316,8 @@ rdev_install <- function(root, quiet = TRUE) {
   }
 
   ## Results from a different baseline are not comparable, start over
-  previous <- db_metadata_get(root, "r_old_version")
-  if (length(previous) && previous != old$version) {
+  previous <- db_metadata_get(root, "r_old_fingerprint")
+  if (length(previous) && previous != old$fingerprint) {
     message("The old R build has changed, all packages will be checked again")
     rdev_invalidate_old(root)
   }
@@ -324,8 +326,10 @@ rdev_install <- function(root, quiet = TRUE) {
   db_metadata_set(root, "r_new", config$r_new)
   db_metadata_set(root, "r_old_version", old$version)
   db_metadata_set(root, "r_new_version", new$version)
+  db_metadata_set(root, "r_old_fingerprint", old$fingerprint)
+  db_metadata_set(root, "r_new_fingerprint", new$fingerprint)
 
-  rdev_install_tools(root, config$r_old, old$minor, quiet = quiet)
+  rdev_install_tools(root, config$r_old, old, quiet = quiet)
 
   db_metadata_set(root, "todo", "run")
   invisible()
@@ -346,10 +350,14 @@ rdev_invalidate_old <- function(root) {
 
 ## crancache (and withr, used by the install code) must be loadable by the R
 ## build that installs the dependencies, so they get a private library
-## built by that R. Rebuilt only when the R major.minor version changes.
-rdev_install_tools <- function(root, rbin, minor, quiet = TRUE) {
+## built by that R, and rebuilt whenever that build changes.
+rdev_install_tools <- function(root, rbin, info, quiet = TRUE) {
   tools <- dir_find(root, "tools")
-  if (identical(rdev_tools_built_for(tools), minor)) {
+  same_build <- identical(
+    db_metadata_get(root, "tools_fingerprint"),
+    info$fingerprint
+  )
+  if (same_build && identical(rdev_tools_built_for(tools), info$minor)) {
     return(invisible())
   }
 
@@ -409,6 +417,7 @@ rdev_install_tools <- function(root, rbin, minor, quiet = TRUE) {
     show = !quiet
   )
 
+  db_metadata_set(root, "tools_fingerprint", info$fingerprint)
   invisible()
 }
 
@@ -509,22 +518,46 @@ rdev_r_binary <- function(path) {
   normalizePath(path)
 }
 
+## Identity of an R build. The fingerprint is what decides whether results
+## and the tools library made with an earlier build are still valid, so it
+## covers more than the version string: a rebuild of the same revision with
+## other flags or a local patch changes the binaries' modification time,
+## and a git mirror build may not know its svn revision at all.
 rdev_r_info <- function(rbin) {
   func <- function() {
+    home <- R.home()
+    files <- c(
+      file.path(home, "bin", "exec", "R"),
+      list.files(file.path(home, "lib"), "^libR[.]", full.names = TRUE)
+    )
+    files <- files[file.exists(files)]
+
     list(
       version = R.version.string,
       minor = paste(R.version$major, sub("[.].*$", "", R.version$minor), sep = "."),
-      svn = R.version[["svn rev"]]
+      svn = R.version[["svn rev"]],
+      mtime = if (length(files)) max(file.info(files)$mtime) else NA
     )
   }
 
-  callr::r(
+  info <- callr::r(
     func,
     arch = rbin,
     libpath = character(),
     system_profile = FALSE,
     user_profile = FALSE
   )
+
+  mtime <- if (is.na(info$mtime)) file.info(rbin)$mtime else info$mtime
+  info$fingerprint <- paste(
+    rbin,
+    info$version,
+    info$svn,
+    format(mtime, "%Y-%m-%d %H:%M:%S", tz = "UTC"),
+    sep = " | "
+  )
+
+  info
 }
 
 ## Can the result of the old build be reused for this tarball? Only
