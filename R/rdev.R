@@ -339,8 +339,38 @@ rdev_install <- function(root, quiet = TRUE) {
   db_metadata_set(root, "r_new_fingerprint", new$fingerprint)
 
   rdev_install_tools(root, config$r_old, old, quiet = quiet)
+  rdev_warm_cache(root, config)
 
   db_metadata_set(root, "todo", "run")
+  invisible()
+}
+
+## Several workers initializing an empty crancache at once trip over each
+## other (half-written metadata files, "table packages already exists"), so
+## create its repositories and fetch the repository metadata once, serially,
+## with the R build that will use the cache.
+rdev_warm_cache <- function(root, config) {
+  rdev <- rdev_options(root)
+
+  func <- function(repos) {
+    invisible(crancache::available_packages(repos = repos))
+  }
+
+  callr::r(
+    func,
+    args = list(repos = get_repos(bioc = config$bioc, cran = TRUE)),
+    arch = rdev$r_old,
+    libpath = rdev$tools,
+    env = c(
+      CRANCACHE_REPOS = "cran,bioc",
+      CRANCACHE_QUIET = "yes",
+      rdev_cache_env(rdev),
+      rdev_lib_env(rdev$tools)
+    ),
+    system_profile = FALSE,
+    user_profile = FALSE
+  )
+
   invisible()
 }
 

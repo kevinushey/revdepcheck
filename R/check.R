@@ -44,7 +44,7 @@ check_proc <- function(
         libpath = lib,
         args = args,
         env = rdev_lib_env(lib),
-        arch = rdev[[paste0("r_", version)]]
+        rbin = rdev[[paste0("r_", version)]]
       )
     }
   )

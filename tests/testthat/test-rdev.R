@@ -491,11 +491,23 @@ test_that("rdev_check_process runs R CMD check with the given R executable", {
   out <- tempfile("rdevtest-out")
   dir.create(out)
 
-  ## The current R, but selected by path like a foreign build would be
+  ## A wrapper around the current R that records that it was the one used
+  marker <- tempfile("rdevtest-marker")
+  wrapper <- tempfile("fake-R-")
+  writeLines(
+    c(
+      "#!/bin/sh",
+      paste0("echo used > '", marker, "'"),
+      paste0("exec '", file.path(R.home("bin"), "R"), "' \"$@\"")
+    ),
+    wrapper
+  )
+  Sys.chmod(wrapper, "0755")
+
   px <- rdev_check_process$new(
     tarball,
     args = c("--no-manual", "-o", out),
-    arch = file.path(R.home("bin"), "R")
+    rbin = wrapper
   )
   on.exit(px$kill(), add = TRUE)
 
@@ -505,9 +517,11 @@ test_that("rdev_check_process runs R CMD check with the given R executable", {
   }
 
   res <- px$parse_results()
+  expect_true(file.exists(marker))
   expect_s3_class(res, "rcmdcheck")
   expect_identical(res$package, "rdevtest")
   expect_identical(res$version, "0.0.1")
   expect_length(res$errors, 0)
+  expect_identical(res$rversion, paste(R.version$major, R.version$minor, sep = "."))
   expect_true(file.exists(file.path(out, "rdevtest.Rcheck", "00check.log")))
 })
