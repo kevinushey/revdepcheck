@@ -20,6 +20,24 @@ fake_check_worker <- function(which, check) {
   )
 }
 
+## Event loop state for a single package `foo` in rdev mode
+fake_state <- function(root, package_state, reuse_old = TRUE) {
+  list(
+    options = list(
+      pkgdir = root,
+      num_workers = 1,
+      rdev = list(reuse_old = reuse_old)
+    ),
+    progress_bar = list(tick = function(...) NULL),
+    workers = list(),
+    packages = data.frame(
+      package = "foo",
+      state = package_state,
+      stringsAsFactors = FALSE
+    )
+  )
+}
+
 fake_pkg <- function(dir = tempfile("fake-pkg-")) {
   dir.create(dir)
   writeLines(c("Package: fakepkg", "Version: 0.0.1"), file.path(dir, "DESCRIPTION"))
@@ -246,6 +264,71 @@ test_that("old results are only reused against the same dependency versions", {
   expect_false(rdev_old_result_usable(root, "foo", "foo_1.0.tar.gz"))
 })
 
+test_that("download_done() reuses a usable old result and only the new check runs", {
+  skip_on_os("windows")
+
+  root <- rdev_init(tempfile("rdev-root-"), fake_r(), fake_r())
+  on.exit(db_disconnect(root), add = TRUE)
+  dir_setup_package(root, "foo")
+  db_todo_add(root, "foo")
+
+  ## A dependency library and a downloaded tarball
+  lib <- dir_find(root, "pkg", "foo")
+  dir.create(file.path(lib, "dep", "Meta"), recursive = TRUE)
+  saveRDS(
+    list(DESCRIPTION = c(Package = "dep", Version = "2.0")),
+    file.path(lib, "dep", "Meta", "package.rds")
+  )
+  file.create(file.path(dir_find(root, "check", "foo"), "foo_1.0.tar.gz"))
+
+  ## An old result against the same dependencies
+  check <- structure(
+    list(
+      package = "foo",
+      version = "1.0",
+      status = 0L,
+      timeout = FALSE,
+      errors = character(),
+      warnings = character(),
+      notes = character(),
+      libraries = "dep@2.0",
+      description = "Package: foo\nVersion: 1.0\nMaintainer: A B <a@b.com>\n"
+    ),
+    class = "rcmdcheck"
+  )
+  db_insert(
+    root,
+    "foo",
+    version = "1.0",
+    status = "OK",
+    which = "old",
+    duration = 1,
+    starttime = "old start",
+    result = unclass(toJSON(check)),
+    summary = NULL
+  )
+
+  worker <- list(package = "foo", task = task("download", "foo", 1L))
+
+  state <- download_done(fake_state(root, "downloading", reuse_old = FALSE), worker)
+  expect_identical(state$packages$state, "downloaded")
+
+  state <- download_done(fake_state(root, "downloading", reuse_old = TRUE), worker)
+  expect_identical(state$packages$state, "done-downloaded")
+  expect_identical(schedule_next_task(state)$args[[2]], "new")
+
+  ## Only the new check runs, then the package is done
+  state$packages$state <- "done-checking"
+  capture.output(state <- check_done(state, fake_check_worker("new", check)))
+  expect_identical(state$packages$state, "done")
+  expect_false(dir.exists(lib))
+
+  results <- db_get_results(root, "foo")
+  expect_identical(results$old$starttime, "old start")
+  expect_identical(nrow(results$new), 1L)
+  expect_identical(db_todo_status(root)$status, "done")
+})
+
 test_that("revdep_check() refuses an rdev root", {
   skip_on_os("windows")
 
@@ -352,16 +435,7 @@ test_that("check_done() snapshots dependencies before the library is removed", {
     ),
     class = "rcmdcheck"
   )
-  state <- list(
-    options = list(pkgdir = root, rdev = list(reuse_old = TRUE)),
-    progress_bar = list(tick = function(...) NULL),
-    workers = list(),
-    packages = data.frame(
-      package = "foo",
-      state = "checking-checking",
-      stringsAsFactors = FALSE
-    )
-  )
+  state <- fake_state(root, "checking-checking")
 
   ## Both checks run at once and the new one finishes first
   state <- check_done(state, fake_check_worker("new", check))

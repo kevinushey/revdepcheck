@@ -339,7 +339,7 @@ rdev_install <- function(root, quiet = TRUE) {
   db_metadata_set(root, "r_new_fingerprint", new$fingerprint)
 
   rdev_install_tools(root, config$r_old, old, quiet = quiet)
-  rdev_warm_cache(root, config)
+  rdev_warm_cache(root)
 
   db_metadata_set(root, "todo", "run")
   invisible()
@@ -349,16 +349,17 @@ rdev_install <- function(root, quiet = TRUE) {
 ## other (half-written metadata files, "table packages already exists"), so
 ## create its repositories and fetch the repository metadata once, serially,
 ## with the R build that will use the cache.
-rdev_warm_cache <- function(root, config) {
+rdev_warm_cache <- function(root) {
   rdev <- rdev_options(root)
 
   func <- function(repos) {
     invisible(crancache::available_packages(repos = repos))
   }
 
+  ## The same repositories the dependency installs use, see deps_opts()
   callr::r(
     func,
-    args = list(repos = get_repos(bioc = config$bioc, cran = TRUE)),
+    args = list(repos = get_repos(bioc = TRUE, cran = TRUE)),
     arch = rdev$r_old,
     libpath = rdev$tools,
     env = c(
