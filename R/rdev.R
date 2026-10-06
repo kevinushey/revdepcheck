@@ -613,15 +613,11 @@ rdev_r_binary <- function(path) {
 rdev_r_info <- function(rbin) {
   func <- function() {
     home <- R.home()
+    base <- rownames(utils::installed.packages(.Library, priority = "base"))
     files <- c(
       file.path(home, "bin", "exec", "R"),
       list.files(file.path(home, "lib"), "^libR[.]", full.names = TRUE),
-      list.files(
-        file.path(home, "library"),
-        "[.]rdb$",
-        recursive = TRUE,
-        full.names = TRUE
-      )
+      file.path(home, "library", base, "R", paste0(base, ".rdb"))
     )
     files <- files[file.exists(files)]
 
@@ -697,6 +693,11 @@ tarball_version <- function(path) {
   sub("^.*_([^_]+)\\.tar\\.gz$", "\\1", basename(path))
 }
 
+## The default available.packages() filters minus R_version: whether a
+## package needs a newer R than this session is irrelevant, the builds
+## under test decide that
+rdev_filters <- c("OS_type", "subarch", "duplicates")
+
 ## Resolve a package selection against the repositories. Unknown packages
 ## are dropped with a warning, so that a typo does not stall the run.
 #' @importFrom utils available.packages
@@ -707,7 +708,12 @@ rdev_packages <- function(
   bioc = FALSE
 ) {
   if (length(revdeps_of)) {
-    revdeps <- cran_revdeps(revdeps_of, dependencies, bioc = bioc)
+    revdeps <- cran_revdeps(
+      revdeps_of,
+      dependencies,
+      bioc = bioc,
+      filters = rdev_filters
+    )
     packages <- c(packages, revdeps_of, revdeps)
   }
   packages <- unique(as.character(packages))
@@ -716,7 +722,7 @@ rdev_packages <- function(
   }
 
   repos <- get_repos(bioc = bioc, cran = TRUE)
-  available <- rownames(available.packages(repos = repos))
+  available <- rownames(available.packages(repos = repos, filters = rdev_filters))
 
   unknown <- setdiff(packages, available)
   if (length(unknown)) {

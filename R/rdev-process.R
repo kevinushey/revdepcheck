@@ -41,7 +41,10 @@ rdev_check_process <- R6Class(
 
     kill = function(...) {
       private$killed <- TRUE
-      super$kill(...)
+      res <- super$kill(...)
+      ## a killed check is never parsed, so clean up here
+      unlink(private$check_dir, recursive = TRUE)
+      res
     }
   ),
   private = list(

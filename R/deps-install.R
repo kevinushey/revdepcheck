@@ -33,7 +33,7 @@ deps_install_opts <- function(
   exclude <- if (is.null(rdev)) pkg_name(pkgdir) else character()
 
   args <- c(
-    deps_opts(pkgname, exclude = exclude),
+    deps_opts(pkgname, exclude = exclude, rdev = rdev),
 
     list(
       libdir = dir_find(pkgdir, "pkg", pkgname),
@@ -65,10 +65,20 @@ deps_install_opts <- function(
   )
 }
 
-deps_opts <- function(pkgname, exclude = character()) {
+deps_opts <- function(pkgname, exclude = character(), rdev = NULL) {
   ## We set repos, so that dependencies from Bioconductor are installed
   ## automatically
   repos <- get_repos(bioc = TRUE, cran = TRUE)
+
+  ## In rdev mode availability is judged for the R build under test, not
+  ## for this session, so the R version filter is left out and the root's
+  ## package cache is used
+  filters <- if (is.null(rdev)) NULL else rdev_filters
+  env <- c(
+    CRANCACHE_REPOS = "cran,bioc",
+    CRANCACHE_QUIET = "yes",
+    rdev_cache_env(rdev)
+  )
 
   ## We have to do this "manually", because some of the dependencies
   ## might be also dependencies of crancache, so they will be already
@@ -76,7 +86,7 @@ deps_opts <- function(pkgname, exclude = character()) {
   ## But we want to install everything into the package's specific library,
   ## because this is the only library used for the check.
   '!DEBUG Querying dependencies of `paste(pkgname, collapse = ", ")`'
-  packages <- cran_deps(pkgname, repos)
+  packages <- with_envvar(env, cran_deps(pkgname, repos, filters = filters))
 
   packages <- setdiff(packages, exclude)
 
@@ -85,8 +95,8 @@ deps_opts <- function(pkgname, exclude = character()) {
   ## warning
   "!DEBUG dropping unavailable dependencies"
   available <- with_envvar(
-    c(CRANCACHE_REPOS = "cran,bioc", CRANCACHE_QUIET = "yes"),
-    rownames(available_packages(repos = repos))
+    env,
+    rownames(available_packages_with(repos, filters))
   )
   packages <- intersect(packages, available)
 

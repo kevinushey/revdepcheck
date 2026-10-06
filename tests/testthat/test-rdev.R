@@ -345,6 +345,77 @@ test_that("download_done() reuses a usable old result and only the new check run
   expect_identical(db_todo_status(root)$status, "done")
 })
 
+test_that("rdev_install() starts over when the old build changes", {
+  skip_on_os("windows")
+
+  root <- rdev_init(tempfile("rdev-root-"), fake_r(), fake_r())
+  on.exit(db_disconnect(root), add = TRUE)
+
+  ## A finished package and a populated default cache
+  db_todo_add(root, "foo")
+  for (which in c("old", "new")) {
+    db_insert(
+      root,
+      "foo",
+      version = "1.0",
+      status = "OK",
+      which = which,
+      duration = 1,
+      starttime = Sys.time(),
+      result = "{}",
+      summary = NULL
+    )
+  }
+  cache <- dir_find(root, "cache")
+
+  fingerprint <- "build A"
+  local_mocked_bindings(
+    rdev_r_info = function(rbin) {
+      list(version = "R x", minor = "4.7", svn = "1", fingerprint = fingerprint)
+    },
+    rdev_install_tools = function(...) NULL,
+    rdev_warm_cache = function(...) NULL
+  )
+
+  rdev_install(root)
+  expect_identical(db_metadata_get(root, "r_old_fingerprint"), "build A")
+  expect_identical(db_metadata_get(root, "todo"), "run")
+  expect_identical(db_todo_status(root)$status, "done")
+  writeLines("x", file.path(cache, "binary"))
+
+  ## Same build: nothing happens
+  rdev_install(root)
+  expect_identical(db_todo_status(root)$status, "done")
+  expect_true(file.exists(file.path(cache, "binary")))
+
+  ## Other build: old results dropped, package re-queued, cache cleared
+  fingerprint <- "build B"
+  expect_message(rdev_install(root), "checked again")
+  expect_identical(db_metadata_get(root, "r_old_fingerprint"), "build B")
+  expect_identical(db_get_results(root, NULL)$old$package, character())
+  expect_identical(db_todo(root), "foo")
+  expect_false(file.exists(file.path(cache, "binary")))
+})
+
+test_that("rdev_check() re-verifies the builds when resuming a run", {
+  skip_on_os("windows")
+
+  root <- rdev_init(tempfile("rdev-root-"), fake_r(), fake_r())
+  on.exit(db_disconnect(root), add = TRUE)
+  db_metadata_set(root, "todo", "run")
+
+  installed <- FALSE
+  local_mocked_bindings(
+    rdev_install = function(root, quiet) {
+      installed <<- TRUE
+      db_metadata_set(root, "todo", "done")
+    }
+  )
+
+  rdev_check(root)
+  expect_true(installed)
+})
+
 test_that("revdep_check() refuses an rdev root", {
   skip_on_os("windows")
 
