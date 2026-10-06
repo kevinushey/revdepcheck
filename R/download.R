@@ -1,4 +1,4 @@
-download_opts <- function(pkgdir, pkgname, bioc, cran) {
+download_opts <- function(pkgdir, pkgname, bioc, cran, rdev = NULL) {
   dir <- dir_find(pkgdir, "check", pkgname)
 
   func <- function(pkgname, dir, repos) {
@@ -15,7 +15,11 @@ download_opts <- function(pkgdir, pkgname, bioc, cran) {
     ),
     system_profile = FALSE,
     user_profile = FALSE,
-    env = c(CRANCACHE_REPOS = "cran,bioc", CRANCACHE_QUIET = "yes")
+    env = c(
+      CRANCACHE_REPOS = "cran,bioc",
+      CRANCACHE_QUIET = "yes",
+      rdev_cache_env(rdev)
+    )
   )
 }
 
@@ -26,7 +30,13 @@ download_task <- function(state, task) {
   cran <- state$options$cran
 
   "!DEBUG Downloading source of `pkgname`"
-  px_opts <- download_opts(pkgdir, pkgname, bioc, cran)
+  px_opts <- download_opts(
+    pkgdir,
+    pkgname,
+    bioc,
+    cran,
+    rdev = state$options$rdev
+  )
   px <- r_process$new(px_opts)
 
   ## update state
@@ -65,8 +75,15 @@ download_done <- function(state, worker) {
     }
   }
 
+  ## In rdev mode a result from the old R build may still be valid, in
+  ## which case only the new build needs to run
+  rdev <- state$options$rdev
+  reuse <- !is.null(rdev) &&
+    isTRUE(rdev$reuse_old) &&
+    rdev_old_result_usable(pkgdir, pkgname, latest_file(tarball))
+
   wpkg <- match(worker$package, state$packages$package)
-  state$packages$state[wpkg] <- "downloaded"
+  state$packages$state[wpkg] <- if (reuse) "done-downloaded" else "downloaded"
   state
 }
 

@@ -4,7 +4,8 @@ check_proc <- function(
   pkgdir,
   pkgname,
   version = c("old", "new"),
-  env = character()
+  env = character(),
+  rdev = NULL
 ) {
   version <- match.arg(version)
 
@@ -30,13 +31,22 @@ check_proc <- function(
   lib <- rev(dir_find(pkgdir, paste0("pkg", version), pkgname))
   library_info(file.path(out, "libraries.txt"), lib)
 
+  args <- c("--no-manual", "--no-build-vignettes", "-o", out)
+
+  ## In rdev mode each side of the comparison is a different R build
   with_envvar(
     c("R_ENVIRON_USER" = tempdir(), "R_LIBS" = "", "NO_COLOR" = "true", env),
-    rcmdcheck_process$new(
-      path = tarball,
-      libpath = lib,
-      args = c("--no-manual", "--no-build-vignettes", "-o", out)
-    )
+    if (is.null(rdev)) {
+      rcmdcheck_process$new(path = tarball, libpath = lib, args = args)
+    } else {
+      rdev_check_process$new(
+        path = tarball,
+        libpath = lib,
+        args = args,
+        env = rdev_lib_env(lib),
+        arch = rdev[[paste0("r_", version)]]
+      )
+    }
   )
 }
 
@@ -46,7 +56,13 @@ check_task <- function(state, task) {
   version <- task$args[[2]]
 
   "!DEBUG Checking `pkgname`"
-  px <- check_proc(pkgdir, pkgname, version = version, env = state$options$env)
+  px <- check_proc(
+    pkgdir,
+    pkgname,
+    version = version,
+    env = state$options$env,
+    rdev = state$options$rdev
+  )
 
   ## Update state
   worker <- list(
