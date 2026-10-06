@@ -8,6 +8,18 @@ fake_r <- function(dir = tempfile("fake-r-")) {
   path
 }
 
+## A finished check worker for check_done(), whose process returns `check`
+fake_check_worker <- function(which, check) {
+  list(
+    package = check$package,
+    task = task("check", check$package, which),
+    process = list(
+      get_start_time = function() Sys.time() - 1,
+      parse_results = function() check
+    )
+  )
+}
+
 fake_pkg <- function(dir = tempfile("fake-pkg-")) {
   dir.create(dir)
   writeLines(c("Package: fakepkg", "Version: 0.0.1"), file.path(dir, "DESCRIPTION"))
@@ -269,15 +281,96 @@ test_that("rdev_reset() keeps the tools library and its fingerprint", {
   root <- rdev_init(tempfile("rdev-root-"), fake_r(), fake_r())
   tools <- dir_find(root, "tools")
 
-  expect_null(rdev_tools_fingerprint(tools))
+  expect_null(rdev_fingerprint_read(tools))
   dir_create(tools)
-  writeLines("some build", rdev_tools_fingerprint_path(tools))
-  expect_identical(rdev_tools_fingerprint(tools), "some build")
+  writeLines("some build", rdev_fingerprint_path(tools))
+  expect_identical(rdev_fingerprint_read(tools), "some build")
 
   rdev_reset(root)
 
   expect_false(file.exists(dir_find(root, "db")))
-  expect_identical(rdev_tools_fingerprint(tools), "some build")
+  expect_identical(rdev_fingerprint_read(tools), "some build")
+})
+
+test_that("the package cache is cleared when the old build changes", {
+  skip_on_os("windows")
+
+  root <- rdev_init(tempfile("rdev-root-"), fake_r(), fake_r())
+  cache <- dir_find(root, "cache")
+
+  ## First use: created and stamped
+  rdev_check_cache(root, NULL, "build A")
+  expect_identical(rdev_fingerprint_read(cache), "build A")
+
+  ## Same build: contents are kept
+  writeLines("x", file.path(cache, "binary"))
+  rdev_check_cache(root, NULL, "build A")
+  expect_true(file.exists(file.path(cache, "binary")))
+
+  ## Other build: cleared and re-stamped
+  expect_message(rdev_check_cache(root, NULL, "build B"), "Clearing")
+  expect_false(file.exists(file.path(cache, "binary")))
+  expect_identical(rdev_fingerprint_read(cache), "build B")
+
+  ## A shared cache is only warned about
+  shared <- tempfile("shared-cache-")
+  rdev_check_cache(root, shared, "build A")
+  writeLines("x", file.path(shared, "binary"))
+  expect_warning(rdev_check_cache(root, shared, "build B"), "not cleared")
+  expect_true(file.exists(file.path(shared, "binary")))
+})
+
+test_that("check_done() snapshots dependencies before the library is removed", {
+  skip_on_os("windows")
+
+  root <- rdev_init(tempfile("rdev-root-"), fake_r(), fake_r())
+  on.exit(db_disconnect(root), add = TRUE)
+
+  lib <- dir_find(root, "pkg", "foo")
+  dir.create(file.path(lib, "dep", "Meta"), recursive = TRUE)
+  saveRDS(
+    list(DESCRIPTION = c(Package = "dep", Version = "2.0")),
+    file.path(lib, "dep", "Meta", "package.rds")
+  )
+  db_todo_add(root, "foo")
+
+  check <- structure(
+    list(
+      package = "foo",
+      version = "1.0",
+      status = 0L,
+      timeout = FALSE,
+      errors = character(),
+      warnings = character(),
+      notes = character(),
+      description = "Package: foo\nVersion: 1.0\nMaintainer: A B <a@b.com>\n"
+    ),
+    class = "rcmdcheck"
+  )
+  state <- list(
+    options = list(pkgdir = root, rdev = list(reuse_old = TRUE)),
+    progress_bar = list(tick = function(...) NULL),
+    workers = list(),
+    packages = data.frame(
+      package = "foo",
+      state = "checking-checking",
+      stringsAsFactors = FALSE
+    )
+  )
+
+  ## Both checks run at once and the new one finishes first
+  state <- check_done(state, fake_check_worker("new", check))
+  expect_identical(state$packages$state, "checking-done")
+  expect_true(dir.exists(lib))
+
+  ## The old one finishing removes the library, after recording it
+  capture.output(state <- check_done(state, fake_check_worker("old", check)))
+  expect_identical(state$packages$state, "done")
+  expect_false(dir.exists(lib))
+
+  old <- checkFromJSON(db_get_results(root, "foo")$old$result)
+  expect_identical(old$libraries, "dep@2.0")
+  expect_identical(db_todo_status(root)$status, "done")
 })
 
 test_that("rdev_invalidate_old() drops old results and re-queues done packages", {

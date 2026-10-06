@@ -322,26 +322,14 @@ rdev_install <- function(root, quiet = TRUE) {
     )
   }
 
-  ## Results from a different baseline are not comparable, start over. The
-  ## binaries in the package cache were built by the previous build too.
+  ## Results from a different baseline are not comparable, start over
   previous <- db_metadata_get(root, "r_old_fingerprint")
   if (length(previous) && previous != old$fingerprint) {
     message("The old R build has changed, all packages will be checked again")
     rdev_invalidate_old(root)
-
-    cache <- config$cache_dir
-    if (is.null(cache)) {
-      unlink(dir_find(root, "cache"), recursive = TRUE)
-    } else {
-      warning(
-        "The old R build has changed, but the package cache ",
-        cache,
-        " is shared and was not cleared. It may hold binaries built by ",
-        "the previous build.",
-        call. = FALSE
-      )
-    }
   }
+
+  rdev_check_cache(root, config$cache_dir, old$fingerprint)
 
   db_metadata_set(root, "r_old", config$r_old)
   db_metadata_set(root, "r_new", config$r_new)
@@ -371,10 +359,11 @@ rdev_invalidate_old <- function(root) {
 
 ## crancache (and withr, used by the install code) must be loadable by the R
 ## build that installs the dependencies, so they get a private library
-## built by that R, and rebuilt whenever that build changes.
+## built by that R, and rebuilt whenever that build changes. The fingerprint
+## of that build lives next to the library, which rdev_reset() keeps.
 rdev_install_tools <- function(root, rbin, info, quiet = TRUE) {
   tools <- dir_find(root, "tools")
-  same_build <- identical(rdev_tools_fingerprint(tools), info$fingerprint)
+  same_build <- identical(rdev_fingerprint_read(tools), info$fingerprint)
   if (same_build && identical(rdev_tools_built_for(tools), info$minor)) {
     return(invisible())
   }
@@ -436,23 +425,54 @@ rdev_install_tools <- function(root, rbin, info, quiet = TRUE) {
     show = !quiet
   )
 
-  writeLines(info$fingerprint, rdev_tools_fingerprint_path(tools))
+  writeLines(info$fingerprint, rdev_fingerprint_path(tools))
   invisible()
 }
 
-## The fingerprint of the R build that made the tools library lives next to
-## the library, not in the database, so that rdev_reset() keeps them together
-rdev_tools_fingerprint_path <- function(tools) {
-  file.path(tools, "fingerprint")
+## The binaries in the package cache were built by the old R build, so the
+## default per-root cache is cleared when that build changes. Its fingerprint
+## is kept in the cache directory itself, which rdev_reset() leaves alone.
+## A user-supplied cache may be shared with other roots, so only warn.
+rdev_check_cache <- function(root, cache_dir, fingerprint) {
+  if (!is.null(cache_dir)) {
+    previous <- rdev_fingerprint_read(cache_dir)
+    if (!is.null(previous) && previous != fingerprint) {
+      warning(
+        "The old R build has changed, but the package cache ",
+        cache_dir,
+        " is shared and was not cleared. It may hold binaries built by ",
+        "the previous build.",
+        call. = FALSE
+      )
+    }
+    dir_create(cache_dir)
+    writeLines(fingerprint, rdev_fingerprint_path(cache_dir))
+    return(invisible())
+  }
+
+  cache <- dir_find(root, "cache")
+  if (dir.exists(cache) && !identical(rdev_fingerprint_read(cache), fingerprint)) {
+    message("Clearing the package cache built by the previous old R build")
+    unlink(cache, recursive = TRUE)
+  }
+  dir_create(cache)
+  writeLines(fingerprint, rdev_fingerprint_path(cache))
+
+  invisible()
 }
 
-rdev_tools_fingerprint <- function(tools) {
-  path <- rdev_tools_fingerprint_path(tools)
+rdev_fingerprint_path <- function(dir) {
+  file.path(dir, "fingerprint")
+}
+
+rdev_fingerprint_read <- function(dir) {
+  path <- rdev_fingerprint_path(dir)
   if (!file.exists(path)) {
     return(NULL)
   }
   readLines(path, n = 1, warn = FALSE)
 }
+
 
 crancache_url <- "https://github.com/r-lib/crancache/archive/HEAD.tar.gz"
 

@@ -130,6 +130,13 @@ check_done <- function(state, worker) {
   my_task <- worker$task
   iam_old <- my_task$args[[2]] == "old"
 
+  ## In rdev mode a result is only reused later if the dependencies it was
+  ## checked against are still the same. Snapshot them now, because the
+  ## state transition below may remove the library.
+  libraries <- if (!is.null(state$options$rdev)) {
+    rdev_library_snapshot(dir_find(state$options$pkgdir, "pkg", worker$package))
+  }
+
   new_state <-
     if (current_state == "checking" && iam_old) {
       "done-downloaded"
@@ -173,11 +180,8 @@ check_done <- function(state, worker) {
     "OK"
   }
 
-  ## In rdev mode a result is only reused later if the dependencies it was
-  ## checked against are still the same, so record them
-  if (!is.null(state$options$rdev) && inherits(chkres, "rcmdcheck")) {
-    lib <- dir_find(state$options$pkgdir, "pkg", worker$package)
-    chkres$libraries <- rdev_library_snapshot(lib)
+  if (!is.null(libraries) && inherits(chkres, "rcmdcheck")) {
+    chkres$libraries <- libraries
   }
 
   summary <- list(
