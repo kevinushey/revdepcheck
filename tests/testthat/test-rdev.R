@@ -190,6 +190,56 @@ test_that("old results are only reused for complete checks of the same version",
   }
 })
 
+test_that("old results are only reused against the same dependency versions", {
+  skip_on_os("windows")
+
+  root <- rdev_init(tempfile("rdev-root-"), fake_r(), fake_r())
+  on.exit(db_disconnect(root), add = TRUE)
+
+  ## A dependency library with one installed package
+  lib <- dir_find(root, "pkg", "foo")
+  dir.create(file.path(lib, "dep", "Meta"), recursive = TRUE)
+  saveRDS(
+    list(DESCRIPTION = c(Package = "dep", Version = "2.0")),
+    file.path(lib, "dep", "Meta", "package.rds")
+  )
+  expect_identical(rdev_library_snapshot(lib), "dep@2.0")
+  expect_identical(rdev_library_snapshot(tempfile()), character())
+
+  check <- structure(
+    list(package = "foo", version = "1.0", libraries = "dep@2.0"),
+    class = "rcmdcheck"
+  )
+  db_insert(
+    root,
+    "foo",
+    version = "1.0",
+    status = "OK",
+    which = "old",
+    duration = 1,
+    starttime = Sys.time(),
+    result = unclass(toJSON(check)),
+    summary = NULL
+  )
+  expect_true(rdev_old_result_usable(root, "foo", "foo_1.0.tar.gz"))
+
+  ## The dependency was updated since
+  saveRDS(
+    list(DESCRIPTION = c(Package = "dep", Version = "2.1")),
+    file.path(lib, "dep", "Meta", "package.rds")
+  )
+  expect_false(rdev_old_result_usable(root, "foo", "foo_1.0.tar.gz"))
+})
+
+test_that("revdep_check() refuses an rdev root", {
+  skip_on_os("windows")
+
+  root <- rdev_init(tempfile("rdev-root-"), fake_r(), fake_r())
+  on.exit(db_disconnect(root), add = TRUE)
+
+  expect_error(revdep_check(root), "use `rdev_check\\(\\)`")
+})
+
 test_that("reusing an old result still installs dependencies first", {
   ## The reuse decision is taken after download, and download is only
   ## scheduled once the dependencies are installed

@@ -66,6 +66,10 @@ revdep_check <- function(
   env = revdep_env_vars()
 ) {
   pkg <- pkg_check(pkg)
+  if (is_rdev(pkg)) {
+    stop("`pkg` is a root created by `rdev_init()`, use `rdev_check()`", call. = FALSE)
+  }
+
   dir_setup(pkg)
   if (!db_exists(pkg)) {
     db_setup(pkg)

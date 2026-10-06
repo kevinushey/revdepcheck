@@ -173,6 +173,13 @@ check_done <- function(state, worker) {
     "OK"
   }
 
+  ## In rdev mode a result is only reused later if the dependencies it was
+  ## checked against are still the same, so record them
+  if (!is.null(state$options$rdev) && inherits(chkres, "rcmdcheck")) {
+    lib <- dir_find(state$options$pkgdir, "pkg", worker$package)
+    chkres$libraries <- rdev_library_snapshot(lib)
+  }
+
   summary <- list(
     errors = length(chkres$errors),
     warnings = length(chkres$warnings),

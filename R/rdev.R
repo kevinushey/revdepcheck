@@ -66,8 +66,9 @@
 #' @param dependencies Which types of reverse dependencies to include for
 #'   `revdeps_of`, see [cran_revdeps()].
 #' @param reuse_old Reuse results of the old build that are already in the
-#'   database, if the package version has not changed? Set to `FALSE` to
-#'   check every package with both builds.
+#'   database? A result is only reused if the package version and the
+#'   versions of all installed dependencies are the same as when it was
+#'   produced. Set to `FALSE` to check every package with both builds.
 #' @param package Name of a checked package.
 #' @inheritParams revdep_check
 #' @inheritParams revdep_add
@@ -321,11 +322,25 @@ rdev_install <- function(root, quiet = TRUE) {
     )
   }
 
-  ## Results from a different baseline are not comparable, start over
+  ## Results from a different baseline are not comparable, start over. The
+  ## binaries in the package cache were built by the previous build too.
   previous <- db_metadata_get(root, "r_old_fingerprint")
   if (length(previous) && previous != old$fingerprint) {
     message("The old R build has changed, all packages will be checked again")
     rdev_invalidate_old(root)
+
+    cache <- config$cache_dir
+    if (is.null(cache)) {
+      unlink(dir_find(root, "cache"), recursive = TRUE)
+    } else {
+      warning(
+        "The old R build has changed, but the package cache ",
+        cache,
+        " is shared and was not cleared. It may hold binaries built by ",
+        "the previous build.",
+        call. = FALSE
+      )
+    }
   }
 
   db_metadata_set(root, "r_old", config$r_old)
@@ -373,6 +388,7 @@ rdev_install_tools <- function(root, rbin, info, quiet = TRUE) {
   ## here because its extra pax header entry confuses desc and R CMD INSTALL.
   targz <- tempfile("crancache-", fileext = ".tar.gz")
   exdir <- tempfile("crancache-")
+  on.exit(unlink(c(targz, exdir), recursive = TRUE), add = TRUE)
   curl::curl_download(crancache_url, targz, quiet = TRUE)
   utils::untar(targz, exdir = exdir)
   src <- dirname(list.files(
@@ -577,14 +593,35 @@ rdev_r_info <- function(rbin) {
   info
 }
 
-## Can the result of the old build be reused for this tarball? Only
-## complete checks of the same package version qualify.
+## Can the result of the old build be reused for this tarball? Only complete
+## checks of the same package version, against the same dependency versions
+## as installed now, qualify.
 rdev_old_result_usable <- function(root, package, tarball) {
   old <- db_get_results(root, package)$old
+  if (
+    nrow(old) != 1 ||
+      !old$status %in% c("OK", "NOTE", "WARNING", "ERROR") ||
+      !identical(old$version, tarball_version(tarball))
+  ) {
+    return(FALSE)
+  }
 
-  nrow(old) == 1 &&
-    old$status %in% c("OK", "NOTE", "WARNING", "ERROR") &&
-    identical(old$version, tarball_version(tarball))
+  check <- checkFromJSON(old$result)
+  identical(
+    sort(as.character(check$libraries)),
+    rdev_library_snapshot(dir_find(root, "pkg", package))
+  )
+}
+
+## Installed package versions of a library, in a stable order
+rdev_library_snapshot <- function(lib) {
+  if (!dir.exists(lib)) {
+    return(character())
+  }
+
+  ## The library changes between checks, so bypass the per-session cache
+  installed <- installed.packages(lib, noCache = TRUE)
+  sort(paste0(installed[, "Package"], "@", installed[, "Version"]))
 }
 
 tarball_version <- function(path) {

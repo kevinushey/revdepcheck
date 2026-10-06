@@ -71,8 +71,9 @@ complete. Default is 10 minutes.}
 processes. See \code{\link[=revdep_env_vars]{revdep_env_vars()}}.}
 
 \item{reuse_old}{Reuse results of the old build that are already in the
-database, if the package version has not changed? Set to \code{FALSE} to
-check every package with both builds.}
+database? A result is only reused if the package version and the
+versions of all installed dependencies are the same as when it was
+produced. Set to \code{FALSE} to check every package with both builds.}
 
 \item{packages}{Character vector of package names to check.}
 
