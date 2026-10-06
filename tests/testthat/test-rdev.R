@@ -416,6 +416,25 @@ test_that("rdev_check() re-verifies the builds when resuming a run", {
   expect_true(installed)
 })
 
+test_that("worker processes run with the old build in rdev mode", {
+  skip_on_os("windows")
+
+  root <- rdev_init(tempfile("rdev-root-"), fake_r(), fake_r())
+  on.exit(db_disconnect(root), add = TRUE)
+  rdev <- rdev_options(root)
+
+  opts <- download_opts(root, "foo", bioc = FALSE, cran = TRUE, rdev = rdev)
+  expect_identical(opts$arch, rdev$r_old)
+  expect_identical(opts$libpath, rdev$tools)
+  expect_identical(opts$env[["CRANCACHE_DIR"]], rdev$cache)
+  expect_identical(opts$env[["R_LIBS_USER"]], rdev$tools)
+
+  ## Ordinary revdep checks are untouched
+  opts <- download_opts(root, "foo", bioc = FALSE, cran = TRUE)
+  expect_identical(opts$arch, "same")
+  expect_false("CRANCACHE_DIR" %in% names(opts$env))
+})
+
 test_that("revdep_check() refuses an rdev root", {
   skip_on_os("windows")
 

@@ -6,6 +6,8 @@ download_opts <- function(pkgdir, pkgname, bioc, cran, rdev = NULL) {
     file.copy(dest, dir)
   }
 
+  ## In rdev mode the download runs with the old build, like the dependency
+  ## installs: this session's R would filter out packages needing a newer R
   r_process_options(
     func = func,
     args = list(
@@ -13,12 +15,15 @@ download_opts <- function(pkgdir, pkgname, bioc, cran, rdev = NULL) {
       dir = dir,
       repos = get_repos(bioc = bioc, cran = cran)
     ),
+    libpath = if (is.null(rdev)) .libPaths() else rdev$tools,
+    arch = rdev$r_old %||% "same",
     system_profile = FALSE,
     user_profile = FALSE,
     env = c(
       CRANCACHE_REPOS = "cran,bioc",
       CRANCACHE_QUIET = "yes",
-      rdev_cache_env(rdev)
+      rdev_cache_env(rdev),
+      if (!is.null(rdev)) rdev_lib_env(rdev$tools)
     )
   )
 }
