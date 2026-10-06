@@ -28,9 +28,9 @@
 #' After changing and rebuilding the new R, call `rdev_add_broken()` (or
 #' `rdev_add()`) and `rdev_check()` again. With `reuse_old = TRUE` the
 #' results of the old build are kept, and only the new build is re-run. If
-#' the old build itself changes (its path, version, svn revision or the
-#' modification time of its binaries), all packages are checked again and
-#' the tools library is rebuilt.
+#' the old build itself changes (its path, version, svn revision, or the
+#' modification time of its binaries or base packages), all packages are
+#' checked again and the tools library is rebuilt.
 #'
 #' Both builds share the dependency libraries, which are installed by the
 #' old build. This assumes the two builds have the same `major.minor`
@@ -606,15 +606,22 @@ rdev_r_binary <- function(path) {
 
 ## Identity of an R build. The fingerprint is what decides whether results
 ## and the tools library made with an earlier build are still valid, so it
-## covers more than the version string: a rebuild of the same revision with
-## other flags or a local patch changes the binaries' modification time,
-## and a git mirror build may not know its svn revision at all.
+## covers more than the version string, which a rebuild of the same revision
+## keeps, and a git mirror build may not know its svn revision at all. The
+## newest modification time of the binaries and of the base packages'
+## lazy-load databases moves for C-level and R-level changes respectively.
 rdev_r_info <- function(rbin) {
   func <- function() {
     home <- R.home()
     files <- c(
       file.path(home, "bin", "exec", "R"),
-      list.files(file.path(home, "lib"), "^libR[.]", full.names = TRUE)
+      list.files(file.path(home, "lib"), "^libR[.]", full.names = TRUE),
+      list.files(
+        file.path(home, "library"),
+        "[.]rdb$",
+        recursive = TRUE,
+        full.names = TRUE
+      )
     )
     files <- files[file.exists(files)]
 
@@ -659,7 +666,12 @@ rdev_old_result_usable <- function(root, package, tarball) {
     return(FALSE)
   }
 
+  ## Results without a snapshot predate the dependency gate
   check <- checkFromJSON(old$result)
+  if (is.null(check$libraries)) {
+    return(FALSE)
+  }
+
   identical(
     sort(as.character(check$libraries)),
     rdev_library_snapshot(dir_find(root, "pkg", package))

@@ -189,6 +189,7 @@ test_that("old results are only reused for complete checks of the same version",
 
   expect_false(rdev_old_result_usable(root, "foo", "foo_1.0.tar.gz"))
 
+  ## A result without a dependency snapshot is never reused
   db_insert(
     root,
     "foo",
@@ -198,6 +199,21 @@ test_that("old results are only reused for complete checks of the same version",
     duration = 1,
     starttime = Sys.time(),
     result = "{}",
+    summary = NULL
+  )
+  expect_false(rdev_old_result_usable(root, "foo", "foo_1.0.tar.gz"))
+
+  ## No dependencies then, none installed now
+  check <- structure(list(libraries = character()), class = "rcmdcheck")
+  db_insert(
+    root,
+    "foo",
+    version = "1.0",
+    status = "OK",
+    which = "old",
+    duration = 1,
+    starttime = Sys.time(),
+    result = unclass(toJSON(check)),
     summary = NULL
   )
   expect_true(rdev_old_result_usable(root, "foo", "foo_1.0.tar.gz"))
