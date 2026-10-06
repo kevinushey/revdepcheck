@@ -190,6 +190,46 @@ test_that("old results are only reused for complete checks of the same version",
   }
 })
 
+test_that("reusing an old result still installs dependencies first", {
+  ## The reuse decision is taken after download, and download is only
+  ## scheduled once the dependencies are installed
+  state <- list(
+    options = list(num_workers = 1, rdev = list(reuse_old = TRUE)),
+    workers = list(),
+    packages = data.frame(
+      package = "foo",
+      state = "todo",
+      stringsAsFactors = FALSE
+    )
+  )
+  expect_identical(schedule_next_task(state)$name, "deps_install")
+
+  state$packages$state <- "deps_installed"
+  expect_identical(schedule_next_task(state)$name, "download")
+
+  state$packages$state <- "done-downloaded"
+  task <- schedule_next_task(state)
+  expect_identical(task$name, "check")
+  expect_identical(task$args[[2]], "new")
+})
+
+test_that("rdev_reset() keeps the tools library and its fingerprint", {
+  skip_on_os("windows")
+
+  root <- rdev_init(tempfile("rdev-root-"), fake_r(), fake_r())
+  tools <- dir_find(root, "tools")
+
+  expect_null(rdev_tools_fingerprint(tools))
+  dir_create(tools)
+  writeLines("some build", rdev_tools_fingerprint_path(tools))
+  expect_identical(rdev_tools_fingerprint(tools), "some build")
+
+  rdev_reset(root)
+
+  expect_false(file.exists(dir_find(root, "db")))
+  expect_identical(rdev_tools_fingerprint(tools), "some build")
+})
+
 test_that("rdev_invalidate_old() drops old results and re-queues done packages", {
   skip_on_os("windows")
 

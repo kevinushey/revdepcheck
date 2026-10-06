@@ -150,6 +150,12 @@ rdev_check <- function(
     db_setup(root)
   }
 
+  ## An interrupted run resumes through the install stage, so that an old
+  ## build rebuilt in the meantime is noticed before its results are reused
+  if (identical(db_metadata_get(root, "todo"), "run")) {
+    db_metadata_set(root, "todo", "install")
+  }
+
   repeat {
     stage <- db_metadata_get(root, "todo") %|0|% "install"
     switch(
@@ -353,10 +359,7 @@ rdev_invalidate_old <- function(root) {
 ## built by that R, and rebuilt whenever that build changes.
 rdev_install_tools <- function(root, rbin, info, quiet = TRUE) {
   tools <- dir_find(root, "tools")
-  same_build <- identical(
-    db_metadata_get(root, "tools_fingerprint"),
-    info$fingerprint
-  )
+  same_build <- identical(rdev_tools_fingerprint(tools), info$fingerprint)
   if (same_build && identical(rdev_tools_built_for(tools), info$minor)) {
     return(invisible())
   }
@@ -417,8 +420,22 @@ rdev_install_tools <- function(root, rbin, info, quiet = TRUE) {
     show = !quiet
   )
 
-  db_metadata_set(root, "tools_fingerprint", info$fingerprint)
+  writeLines(info$fingerprint, rdev_tools_fingerprint_path(tools))
   invisible()
+}
+
+## The fingerprint of the R build that made the tools library lives next to
+## the library, not in the database, so that rdev_reset() keeps them together
+rdev_tools_fingerprint_path <- function(tools) {
+  file.path(tools, "fingerprint")
+}
+
+rdev_tools_fingerprint <- function(tools) {
+  path <- rdev_tools_fingerprint_path(tools)
+  if (!file.exists(path)) {
+    return(NULL)
+  }
+  readLines(path, n = 1, warn = FALSE)
 }
 
 crancache_url <- "https://github.com/r-lib/crancache/archive/HEAD.tar.gz"

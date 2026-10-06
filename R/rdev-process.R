@@ -63,6 +63,8 @@ rdev_process_init <- function(
   private$path <- path
   private$check_dir <- check_dir
   private$targz <- targz
+  ## so that the inherited parse_results() removes the scratch directory
+  private$tempfiles <- check_dir
 
   chkenv <- callr::rcmd_safe_env()
   if (length(env)) {
