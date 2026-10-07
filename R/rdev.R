@@ -120,7 +120,12 @@ rdev_init <- function(root, r_old, r_new, bioc = FALSE, cache_dir = NULL) {
   dir_create(root)
   root <- normalizePath(root, mustWork = TRUE)
 
-  config <- list(r_old = r_old, r_new = r_new, bioc = bioc, cache_dir = cache_dir)
+  config <- list(
+    r_old = r_old,
+    r_new = r_new,
+    bioc = bioc,
+    cache_dir = cache_dir
+  )
   rdev_config_write(root, config)
 
   dir_setup(root)
@@ -484,7 +489,9 @@ rdev_check_cache <- function(root, cache_dir, fingerprint) {
   }
 
   cache <- dir_find(root, "cache")
-  if (dir.exists(cache) && !identical(rdev_fingerprint_read(cache), fingerprint)) {
+  if (
+    dir.exists(cache) && !identical(rdev_fingerprint_read(cache), fingerprint)
+  ) {
     message("Clearing the package cache built by the previous old R build")
     unlink(cache, recursive = TRUE)
   }
@@ -623,7 +630,11 @@ rdev_r_info <- function(rbin) {
 
     list(
       version = R.version.string,
-      minor = paste(R.version$major, sub("[.].*$", "", R.version$minor), sep = "."),
+      minor = paste(
+        R.version$major,
+        sub("[.].*$", "", R.version$minor),
+        sep = "."
+      ),
       svn = R.version[["svn rev"]],
       mtime = if (length(files)) max(file.info(files)$mtime) else NA
     )
@@ -722,7 +733,10 @@ rdev_packages <- function(
   }
 
   repos <- get_repos(bioc = bioc, cran = TRUE)
-  available <- rownames(available.packages(repos = repos, filters = rdev_filters))
+  available <- rownames(available.packages(
+    repos = repos,
+    filters = rdev_filters
+  ))
 
   unknown <- setdiff(packages, available)
   if (length(unknown)) {

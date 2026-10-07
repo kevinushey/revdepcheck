@@ -447,7 +447,11 @@ revdep_report <- function(
   ## The CRAN submission summary is about a package release
   if (!is_rdev(pkg)) {
     message("Writing CRAN report to '", shown, "/cran.md'")
-    revdep_report_cran(pkg, file = file.path(root, "cran.md"), results = results)
+    revdep_report_cran(
+      pkg,
+      file = file.path(root, "cran.md"),
+      results = results
+    )
   }
 
   invisible()

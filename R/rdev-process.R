@@ -55,7 +55,16 @@ rdev_check_process <- R6Class(
   )
 )
 
-rdev_process_init <- function(self, private, super, path, args, libpath, env, rbin) {
+rdev_process_init <- function(
+  self,
+  private,
+  super,
+  path,
+  args,
+  libpath,
+  env,
+  rbin
+) {
   path <- normalizePath(path, mustWork = TRUE)
   if (file.info(path)$isdir) {
     stop("`path` must be a source package tarball", call. = FALSE)

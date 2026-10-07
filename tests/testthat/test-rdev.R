@@ -38,9 +38,31 @@ fake_state <- function(root, package_state, reuse_old = TRUE) {
   )
 }
 
+## An installed package as installed.packages() sees it. Older R takes the
+## Built version from the metadata list, newer R from the DESCRIPTION field.
+fake_installed <- function(lib, pkg, version, r = "4.7.0") {
+  dir.create(
+    file.path(lib, pkg, "Meta"),
+    recursive = TRUE,
+    showWarnings = FALSE
+  )
+  desc <- c(
+    Package = pkg,
+    Version = version,
+    Built = paste0("R ", r, "; ; 2026-02-20 10:00:00 UTC; unix")
+  )
+  saveRDS(
+    list(DESCRIPTION = desc, Built = list(R = package_version(r))),
+    file.path(lib, pkg, "Meta", "package.rds")
+  )
+}
+
 fake_pkg <- function(dir = tempfile("fake-pkg-")) {
   dir.create(dir)
-  writeLines(c("Package: fakepkg", "Version: 0.0.1"), file.path(dir, "DESCRIPTION"))
+  writeLines(
+    c("Package: fakepkg", "Version: 0.0.1"),
+    file.path(dir, "DESCRIPTION")
+  )
   dir
 }
 
@@ -71,8 +93,14 @@ test_that("rdev_init() creates a root that pkg_check() and dir_find() accept", {
   expect_identical(dir_find(root, "db"), file.path(root, "data.sqlite"))
   expect_null(dir_find(root, "old"))
   expect_null(dir_find(root, "new"))
-  expect_identical(dir_find(root, "pkgold", "foo"), dir_find(root, "pkg", "foo"))
-  expect_identical(dir_find(root, "pkgnew", "foo"), dir_find(root, "pkg", "foo"))
+  expect_identical(
+    dir_find(root, "pkgold", "foo"),
+    dir_find(root, "pkg", "foo")
+  )
+  expect_identical(
+    dir_find(root, "pkgnew", "foo"),
+    dir_find(root, "pkg", "foo")
+  )
   expect_true(startsWith(dir_find(root, "tools"), root))
   expect_true(startsWith(dir_find(root, "cache"), root))
 
@@ -136,16 +164,7 @@ test_that("rdev_tools_built_for() reads the R version from the Built field", {
 
   ## installed.packages() only looks at the installed metadata
   for (pkg in c("crancache", "withr")) {
-    dir.create(file.path(tools, pkg, "Meta"), recursive = TRUE)
-    desc <- c(
-      Package = pkg,
-      Version = "1.0.0",
-      Built = "R 4.7.0; ; 2026-02-20 10:00:00 UTC; unix"
-    )
-    saveRDS(
-      list(DESCRIPTION = desc),
-      file.path(tools, pkg, "Meta", "package.rds")
-    )
+    fake_installed(tools, pkg, "1.0.0")
   }
   expect_identical(rdev_tools_built_for(tools), "4.7")
 
@@ -244,11 +263,7 @@ test_that("old results are only reused against the same dependency versions", {
 
   ## A dependency library with one installed package
   lib <- dir_find(root, "pkg", "foo")
-  dir.create(file.path(lib, "dep", "Meta"), recursive = TRUE)
-  saveRDS(
-    list(DESCRIPTION = c(Package = "dep", Version = "2.0")),
-    file.path(lib, "dep", "Meta", "package.rds")
-  )
+  fake_installed(lib, "dep", "2.0")
   expect_identical(rdev_library_snapshot(lib), "dep@2.0")
   expect_identical(rdev_library_snapshot(tempfile()), character())
   empty <- tempfile("empty-lib-")
@@ -273,10 +288,7 @@ test_that("old results are only reused against the same dependency versions", {
   expect_true(rdev_old_result_usable(root, "foo", "foo_1.0.tar.gz"))
 
   ## The dependency was updated since
-  saveRDS(
-    list(DESCRIPTION = c(Package = "dep", Version = "2.1")),
-    file.path(lib, "dep", "Meta", "package.rds")
-  )
+  fake_installed(lib, "dep", "2.1")
   expect_false(rdev_old_result_usable(root, "foo", "foo_1.0.tar.gz"))
 })
 
@@ -290,11 +302,7 @@ test_that("download_done() reuses a usable old result and only the new check run
 
   ## A dependency library and a downloaded tarball
   lib <- dir_find(root, "pkg", "foo")
-  dir.create(file.path(lib, "dep", "Meta"), recursive = TRUE)
-  saveRDS(
-    list(DESCRIPTION = c(Package = "dep", Version = "2.0")),
-    file.path(lib, "dep", "Meta", "package.rds")
-  )
+  fake_installed(lib, "dep", "2.0")
   file.create(file.path(dir_find(root, "check", "foo"), "foo_1.0.tar.gz"))
 
   ## An old result against the same dependencies
@@ -326,10 +334,16 @@ test_that("download_done() reuses a usable old result and only the new check run
 
   worker <- list(package = "foo", task = task("download", "foo", 1L))
 
-  state <- download_done(fake_state(root, "downloading", reuse_old = FALSE), worker)
+  state <- download_done(
+    fake_state(root, "downloading", reuse_old = FALSE),
+    worker
+  )
   expect_identical(state$packages$state, "downloaded")
 
-  state <- download_done(fake_state(root, "downloading", reuse_old = TRUE), worker)
+  state <- download_done(
+    fake_state(root, "downloading", reuse_old = TRUE),
+    worker
+  )
   expect_identical(state$packages$state, "done-downloaded")
   expect_identical(schedule_next_task(state)$args[[2]], "new")
 
@@ -521,11 +535,7 @@ test_that("check_done() snapshots dependencies before the library is removed", {
   on.exit(db_disconnect(root), add = TRUE)
 
   lib <- dir_find(root, "pkg", "foo")
-  dir.create(file.path(lib, "dep", "Meta"), recursive = TRUE)
-  saveRDS(
-    list(DESCRIPTION = c(Package = "dep", Version = "2.0")),
-    file.path(lib, "dep", "Meta", "package.rds")
-  )
+  fake_installed(lib, "dep", "2.0")
   db_todo_add(root, "foo")
 
   check <- structure(
@@ -664,7 +674,10 @@ test_that("rdev_check_process runs R CMD check with the given R executable", {
     ),
     file.path(pkg, "DESCRIPTION")
   )
-  writeLines(c("YEAR: 2026", "COPYRIGHT HOLDER: A B"), file.path(pkg, "LICENSE"))
+  writeLines(
+    c("YEAR: 2026", "COPYRIGHT HOLDER: A B"),
+    file.path(pkg, "LICENSE")
+  )
   writeLines("", file.path(pkg, "NAMESPACE"))
   tarball <- pkgbuild::build(pkg, dest_path = tempdir(), quiet = TRUE)
 
@@ -702,6 +715,9 @@ test_that("rdev_check_process runs R CMD check with the given R executable", {
   expect_identical(res$package, "rdevtest")
   expect_identical(res$version, "0.0.1")
   expect_length(res$errors, 0)
-  expect_identical(res$rversion, paste(R.version$major, R.version$minor, sep = "."))
+  expect_identical(
+    res$rversion,
+    paste(R.version$major, R.version$minor, sep = ".")
+  )
   expect_true(file.exists(file.path(out, "rdevtest.Rcheck", "00check.log")))
 })
