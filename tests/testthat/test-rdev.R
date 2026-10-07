@@ -715,9 +715,8 @@ test_that("rdev_check_process runs R CMD check with the given R executable", {
   expect_identical(res$package, "rdevtest")
   expect_identical(res$version, "0.0.1")
   expect_length(res$errors, 0)
-  expect_identical(
-    res$rversion,
-    paste(R.version$major, R.version$minor, sep = ".")
-  )
+  ## rcmdcheck does not parse devel version strings into `rversion`, so look
+  ## at the check output itself
+  expect_match(res$stdout, paste0("using ", R.version.string), fixed = TRUE)
   expect_true(file.exists(file.path(out, "rdevtest.Rcheck", "00check.log")))
 })
